@@ -1,0 +1,8 @@
+{
+  "n_pairs": 30,
+  "n_correct": 14,
+  "accuracy": 0.4667,
+  "tolerance_px": 50,
+  "mean_error_px": 231.23,
+  "mean_runtime_sec": 3.285
+}

@@ -1,0 +1,21 @@
+{
+  "pair_id": 28,
+  "style": "dram",
+  "reference_path": "reference/dram_028_ref.png",
+  "search_path": "search/dram_028_search.png",
+  "center_x": 626.0,
+  "center_y": 397.0,
+  "bbox": [
+    576,
+    347,
+    676,
+    447
+  ],
+  "inset_size": 100,
+  "scale_factor": 10,
+  "applied_rotation_deg": 1.3428351054720267,
+  "applied_scale": 0.9893313595747587,
+  "heavier_noise": false,
+  "hard_case": true,
+  "seed": 70
+}

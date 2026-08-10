@@ -1,0 +1,21 @@
+{
+  "pair_id": 21,
+  "style": "finfet",
+  "reference_path": "reference/finfet_021_ref.png",
+  "search_path": "search/finfet_021_search.png",
+  "center_x": 461.0,
+  "center_y": 551.0,
+  "bbox": [
+    411,
+    501,
+    511,
+    601
+  ],
+  "inset_size": 100,
+  "scale_factor": 10,
+  "applied_rotation_deg": 2.9535532131577424,
+  "applied_scale": 0.9818012425805942,
+  "heavier_noise": false,
+  "hard_case": false,
+  "seed": 63
+}
