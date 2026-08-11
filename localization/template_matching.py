@@ -30,6 +30,38 @@ def _to_gray(img):
     return img
 
 
+def _subpixel_peak(result, x, y):
+    """
+    Parabolic (quadratic) interpolation of the NCC correlation surface
+    around the integer-pixel peak at (x, y), independently in each axis.
+    Applied Materials' webinar explicitly calls out that sub-pixel
+    registration is expected and rewarded over integer-pixel matching
+    ("people doing sub-pixel should be getting rewarded more") -- this is
+    a cheap, standard technique (used ubiquitously in optical-flow /
+    stereo peak refinement) that costs nothing extra since we already
+    have the full correlation surface from cv2.matchTemplate.
+
+    Returns (dx, dy) sub-pixel offset to ADD to the integer peak location.
+    Falls back to (0, 0) at the border where neighbors are unavailable.
+    """
+    h, w = result.shape
+    if x <= 0 or x >= w - 1 or y <= 0 or y >= h - 1:
+        return 0.0, 0.0
+
+    def _parabolic(f_minus, f_0, f_plus):
+        denom = (f_minus - 2 * f_0 + f_plus)
+        if abs(denom) < 1e-8:
+            return 0.0
+        return 0.5 * (f_minus - f_plus) / denom
+
+    dx = _parabolic(result[y, x - 1], result[y, x], result[y, x + 1])
+    dy = _parabolic(result[y - 1, x], result[y, x], result[y + 1, x])
+    # clamp -- parabolic fit can blow up on noisy/flat surfaces
+    dx = float(np.clip(dx, -0.5, 0.5))
+    dy = float(np.clip(dy, -0.5, 0.5))
+    return dx, dy
+
+
 def multiscale_ncc_candidates(reference, search, scales=None, angles=None,
                                topk=5, nms_radius=25):
     """

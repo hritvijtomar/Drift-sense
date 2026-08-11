@@ -22,11 +22,19 @@ import sys
 import json
 import glob
 import math
+import csv
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "localization"))
 from inference import localize
 
-TOLERANCE_PX = 50  # half of INSET_SIZE=100
+TOLERANCE_PX = 50  # half of INSET_SIZE=100 (kept for our own "did it land in the patch" check)
+
+# Official scoring, per the Applied Materials Q&A webinar (Aayush Raina), sweeps
+# pass-rate across a small pixel-error range rather than one threshold:
+# "we start with very liberal approach... five pixel error... then we make it
+# two pixels, one pixel, and then sub pixel... this curve will help us see
+# where actually [your algorithm falls]."
+OFFICIAL_TOLERANCES_PX = [1, 2, 3, 4, 5]
 
 
 def run_evaluation(outputs_dir, tolerance_px=TOLERANCE_PX):
@@ -71,6 +79,14 @@ def run_evaluation(outputs_dir, tolerance_px=TOLERANCE_PX):
     mean_err = sum(r["error_px"] for r in results) / n if n else 0.0
     mean_runtime = sum(r["runtime_sec"] for r in results) / n if n else 0.0
 
+    # Pass-rate sweep across the official 1-5px tolerance range, plus our own
+    # 50px "landed in the patch" check for context. This is the actual
+    # evaluation curve described in the Q&A webinar, not a single accuracy number.
+    tolerance_sweep = {}
+    for t in OFFICIAL_TOLERANCES_PX + [tolerance_px]:
+        n_pass = sum(1 for r in results if r["error_px"] <= t)
+        tolerance_sweep[t] = round(n_pass / n, 4) if n else 0.0
+
     summary = {
         "n_pairs": n,
         "n_correct": n_correct,
@@ -78,9 +94,21 @@ def run_evaluation(outputs_dir, tolerance_px=TOLERANCE_PX):
         "tolerance_px": tolerance_px,
         "mean_error_px": round(mean_err, 2),
         "mean_runtime_sec": round(mean_runtime, 3),
+        "pass_rate_by_tolerance_px": tolerance_sweep,
     }
 
     return results, summary
+
+
+def write_official_csv(results, out_path):
+    """Writes the exact CSV format described in the AM Q&A webinar:
+    search_image_path, GTX, GTY, output_X, output_Y -- so our results are
+    directly compatible with the scoring utility they said they'll release."""
+    with open(out_path, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["search_image_path", "GTX", "GTY", "output_X", "output_Y"])
+        for r in results:
+            writer.writerow([r["search_path"], r["gt_x"], r["gt_y"], r["pred_x"], r["pred_y"]])
 
 
 def write_failure_analysis(results, out_path):
@@ -138,6 +166,7 @@ if __name__ == "__main__":
     parser.add_argument("--results_out", default="results.json")
     parser.add_argument("--summary_out", default="summary.json")
     parser.add_argument("--failure_doc_out", default="../docs/failure_analysis.md")
+    parser.add_argument("--csv_out", default="results_official_format.csv")
     args = parser.parse_args()
 
     results, summary = run_evaluation(args.outputs_dir)
@@ -146,6 +175,7 @@ if __name__ == "__main__":
         json.dump(results, f, indent=2)
     with open(args.summary_out, "w") as f:
         json.dump(summary, f, indent=2)
+    write_official_csv(results, args.csv_out)
 
     os.makedirs(os.path.dirname(args.failure_doc_out), exist_ok=True)
     write_failure_analysis(results, args.failure_doc_out)

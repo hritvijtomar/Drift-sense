@@ -4,5 +4,13 @@
   "accuracy": 0.4667,
   "tolerance_px": 50,
   "mean_error_px": 231.23,
-  "mean_runtime_sec": 3.285
+  "mean_runtime_sec": 5.483,
+  "pass_rate_by_tolerance_px": {
+    "1": 0.4667,
+    "2": 0.4667,
+    "3": 0.4667,
+    "4": 0.4667,
+    "5": 0.4667,
+    "50": 0.4667
+  }
 }

@@ -12,7 +12,7 @@
     "correct": false,
     "confidence": 0.7381,
     "ambiguous_flag": false,
-    "runtime_sec": 3.7339,
+    "runtime_sec": 7.564,
     "reference_path": "../outputs/reference/dram_000_ref.png",
     "search_path": "../outputs/search/dram_000_search.png"
   },
@@ -29,7 +29,7 @@
     "correct": true,
     "confidence": 0.8454,
     "ambiguous_flag": true,
-    "runtime_sec": 3.0802,
+    "runtime_sec": 5.7853,
     "reference_path": "../outputs/reference/dram_002_ref.png",
     "search_path": "../outputs/search/dram_002_search.png"
   },
@@ -46,7 +46,7 @@
     "correct": false,
     "confidence": 0.6765,
     "ambiguous_flag": false,
-    "runtime_sec": 3.1622,
+    "runtime_sec": 6.0084,
     "reference_path": "../outputs/reference/dram_004_ref.png",
     "search_path": "../outputs/search/dram_004_search.png"
   },
@@ -63,7 +63,7 @@
     "correct": false,
     "confidence": 0.3492,
     "ambiguous_flag": true,
-    "runtime_sec": 3.2801,
+    "runtime_sec": 5.9355,
     "reference_path": "../outputs/reference/dram_006_ref.png",
     "search_path": "../outputs/search/dram_006_search.png"
   },
@@ -80,7 +80,7 @@
     "correct": true,
     "confidence": 0.4321,
     "ambiguous_flag": true,
-    "runtime_sec": 3.1206,
+    "runtime_sec": 5.6472,
     "reference_path": "../outputs/reference/dram_008_ref.png",
     "search_path": "../outputs/search/dram_008_search.png"
   },
@@ -97,7 +97,7 @@
     "correct": false,
     "confidence": 0.4803,
     "ambiguous_flag": true,
-    "runtime_sec": 3.3131,
+    "runtime_sec": 6.2088,
     "reference_path": "../outputs/reference/dram_010_ref.png",
     "search_path": "../outputs/search/dram_010_search.png"
   },
@@ -114,7 +114,7 @@
     "correct": false,
     "confidence": 0.8111,
     "ambiguous_flag": true,
-    "runtime_sec": 3.193,
+    "runtime_sec": 5.5967,
     "reference_path": "../outputs/reference/dram_012_ref.png",
     "search_path": "../outputs/search/dram_012_search.png"
   },
@@ -131,7 +131,7 @@
     "correct": false,
     "confidence": 0.4436,
     "ambiguous_flag": true,
-    "runtime_sec": 3.2425,
+    "runtime_sec": 5.6556,
     "reference_path": "../outputs/reference/dram_014_ref.png",
     "search_path": "../outputs/search/dram_014_search.png"
   },
@@ -148,7 +148,7 @@
     "correct": false,
     "confidence": 0.772,
     "ambiguous_flag": false,
-    "runtime_sec": 3.3273,
+    "runtime_sec": 5.3797,
     "reference_path": "../outputs/reference/dram_016_ref.png",
     "search_path": "../outputs/search/dram_016_search.png"
   },
@@ -165,7 +165,7 @@
     "correct": false,
     "confidence": 0.7867,
     "ambiguous_flag": false,
-    "runtime_sec": 3.2941,
+    "runtime_sec": 5.3864,
     "reference_path": "../outputs/reference/dram_018_ref.png",
     "search_path": "../outputs/search/dram_018_search.png"
   },
@@ -182,7 +182,7 @@
     "correct": false,
     "confidence": 0.5414,
     "ambiguous_flag": true,
-    "runtime_sec": 3.2407,
+    "runtime_sec": 5.2265,
     "reference_path": "../outputs/reference/dram_020_ref.png",
     "search_path": "../outputs/search/dram_020_search.png"
   },
@@ -199,7 +199,7 @@
     "correct": false,
     "confidence": 0.8206,
     "ambiguous_flag": false,
-    "runtime_sec": 3.1974,
+    "runtime_sec": 5.5559,
     "reference_path": "../outputs/reference/dram_022_ref.png",
     "search_path": "../outputs/search/dram_022_search.png"
   },
@@ -216,7 +216,7 @@
     "correct": false,
     "confidence": 0.7817,
     "ambiguous_flag": false,
-    "runtime_sec": 3.2269,
+    "runtime_sec": 5.3446,
     "reference_path": "../outputs/reference/dram_024_ref.png",
     "search_path": "../outputs/search/dram_024_search.png"
   },
@@ -233,7 +233,7 @@
     "correct": true,
     "confidence": 0.7968,
     "ambiguous_flag": true,
-    "runtime_sec": 3.3638,
+    "runtime_sec": 5.6655,
     "reference_path": "../outputs/reference/dram_026_ref.png",
     "search_path": "../outputs/search/dram_026_search.png"
   },
@@ -250,7 +250,7 @@
     "correct": false,
     "confidence": 0.642,
     "ambiguous_flag": true,
-    "runtime_sec": 3.347,
+    "runtime_sec": 5.6387,
     "reference_path": "../outputs/reference/dram_028_ref.png",
     "search_path": "../outputs/search/dram_028_search.png"
   },
@@ -267,7 +267,7 @@
     "correct": false,
     "confidence": 0.2483,
     "ambiguous_flag": true,
-    "runtime_sec": 3.2461,
+    "runtime_sec": 5.4669,
     "reference_path": "../outputs/reference/finfet_001_ref.png",
     "search_path": "../outputs/search/finfet_001_search.png"
   },
@@ -284,7 +284,7 @@
     "correct": true,
     "confidence": 0.2138,
     "ambiguous_flag": true,
-    "runtime_sec": 3.2898,
+    "runtime_sec": 5.3318,
     "reference_path": "../outputs/reference/finfet_003_ref.png",
     "search_path": "../outputs/search/finfet_003_search.png"
   },
@@ -301,7 +301,7 @@
     "correct": true,
     "confidence": 0.3294,
     "ambiguous_flag": false,
-    "runtime_sec": 3.2754,
+    "runtime_sec": 5.1423,
     "reference_path": "../outputs/reference/finfet_005_ref.png",
     "search_path": "../outputs/search/finfet_005_search.png"
   },
@@ -318,7 +318,7 @@
     "correct": true,
     "confidence": 0.335,
     "ambiguous_flag": true,
-    "runtime_sec": 3.2993,
+    "runtime_sec": 5.0346,
     "reference_path": "../outputs/reference/finfet_007_ref.png",
     "search_path": "../outputs/search/finfet_007_search.png"
   },
@@ -335,7 +335,7 @@
     "correct": true,
     "confidence": 0.29,
     "ambiguous_flag": true,
-    "runtime_sec": 3.2905,
+    "runtime_sec": 5.2893,
     "reference_path": "../outputs/reference/finfet_009_ref.png",
     "search_path": "../outputs/search/finfet_009_search.png"
   },
@@ -352,7 +352,7 @@
     "correct": true,
     "confidence": 0.3389,
     "ambiguous_flag": true,
-    "runtime_sec": 3.247,
+    "runtime_sec": 5.1183,
     "reference_path": "../outputs/reference/finfet_011_ref.png",
     "search_path": "../outputs/search/finfet_011_search.png"
   },
@@ -369,7 +369,7 @@
     "correct": true,
     "confidence": 0.2376,
     "ambiguous_flag": true,
-    "runtime_sec": 3.3081,
+    "runtime_sec": 5.3744,
     "reference_path": "../outputs/reference/finfet_013_ref.png",
     "search_path": "../outputs/search/finfet_013_search.png"
   },
@@ -386,7 +386,7 @@
     "correct": false,
     "confidence": 0.2585,
     "ambiguous_flag": true,
-    "runtime_sec": 3.3195,
+    "runtime_sec": 5.2023,
     "reference_path": "../outputs/reference/finfet_015_ref.png",
     "search_path": "../outputs/search/finfet_015_search.png"
   },
@@ -403,7 +403,7 @@
     "correct": true,
     "confidence": 0.2822,
     "ambiguous_flag": true,
-    "runtime_sec": 3.3203,
+    "runtime_sec": 5.2593,
     "reference_path": "../outputs/reference/finfet_017_ref.png",
     "search_path": "../outputs/search/finfet_017_search.png"
   },
@@ -420,7 +420,7 @@
     "correct": true,
     "confidence": 0.3335,
     "ambiguous_flag": true,
-    "runtime_sec": 3.2526,
+    "runtime_sec": 5.2578,
     "reference_path": "../outputs/reference/finfet_019_ref.png",
     "search_path": "../outputs/search/finfet_019_search.png"
   },
@@ -437,7 +437,7 @@
     "correct": true,
     "confidence": 0.2803,
     "ambiguous_flag": true,
-    "runtime_sec": 3.2747,
+    "runtime_sec": 5.0473,
     "reference_path": "../outputs/reference/finfet_021_ref.png",
     "search_path": "../outputs/search/finfet_021_search.png"
   },
@@ -454,7 +454,7 @@
     "correct": true,
     "confidence": 0.227,
     "ambiguous_flag": true,
-    "runtime_sec": 3.3422,
+    "runtime_sec": 5.2444,
     "reference_path": "../outputs/reference/finfet_023_ref.png",
     "search_path": "../outputs/search/finfet_023_search.png"
   },
@@ -471,7 +471,7 @@
     "correct": true,
     "confidence": 0.3399,
     "ambiguous_flag": false,
-    "runtime_sec": 3.2917,
+    "runtime_sec": 5.1699,
     "reference_path": "../outputs/reference/finfet_025_ref.png",
     "search_path": "../outputs/search/finfet_025_search.png"
   },
@@ -488,7 +488,7 @@
     "correct": false,
     "confidence": 0.3748,
     "ambiguous_flag": false,
-    "runtime_sec": 3.3294,
+    "runtime_sec": 4.982,
     "reference_path": "../outputs/reference/finfet_027_ref.png",
     "search_path": "../outputs/search/finfet_027_search.png"
   },
@@ -505,7 +505,7 @@
     "correct": false,
     "confidence": 0.3867,
     "ambiguous_flag": true,
-    "runtime_sec": 3.3527,
+    "runtime_sec": 4.9584,
     "reference_path": "../outputs/reference/finfet_029_ref.png",
     "search_path": "../outputs/search/finfet_029_search.png"
   }

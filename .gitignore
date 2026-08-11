@@ -1,9 +1,59 @@
+# Python cache
 __pycache__/
-*.pyc
+*.py[cod]
+*$py.class
+
+# Virtual environments
 .venv/
 venv/
+env/
+ENV/
+
+# IDE / editor files
 .vscode/
 .idea/
+
+# OS files
 .DS_Store
+Thumbs.db
+
+# Environment / secrets
+.env
+.env.*
+
+# Logs
+*.log
+
+# Temporary / scratch files
+*_tmp/
+tmp/
+temp/
+experiments/_tmp/
+
+# Generated image data
 outputs/reference/*.png
 outputs/search/*.png
+
+# Generated datasets / large local artifacts
+outputs/generated/
+dataset/generated/
+
+# Model checkpoints / weights
+*.pt
+*.pth
+*.ckpt
+*.onnx
+*.h5
+*.keras
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Python packaging
+*.egg-info/
+dist/
+build/
+
+# Local test / profiling output
+.prof
+.profraw
