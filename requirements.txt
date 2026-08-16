@@ -4,3 +4,5 @@ matplotlib==3.10.8
 streamlit
 
 Flask
+
+gunicorn
