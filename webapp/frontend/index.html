@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Drift-Sense &mdash; Wafer Pattern Localization</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand">
+    <span class="mark">
+      <svg viewBox="0 0 24 24" fill="none"><path d="M4 12h4l2-7 4 14 2-7h4" stroke="white" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </span>
+    <span class="name">Drift-Sense</span>
+    <span class="tag">LIVE PIPELINE CONSOLE</span>
+  </div>
+  <div class="mode-toggle" id="modeToggle">
+    <button data-mode="example" class="active">Curated Examples</button>
+    <button data-mode="upload">Explore Your Own Images</button>
+  </div>
+</div>
+
+<div class="shell">
+
+  <!-- ===================== CURATED EXAMPLE STRIP (compact) ============== -->
+  <div class="panel" id="examplePanel">
+    <div class="scenario-strip" id="exampleRail">
+      <div class="placeholder">Loading curated cases&hellip;</div>
+    </div>
+    <div class="scenario-desc" id="scenarioDesc"></div>
+  </div>
+
+  <!-- ===================== UPLOAD PANEL (hidden by default) ============= -->
+  <div class="panel" id="uploadPanel" style="display:none;">
+    <div class="panel-head"><span class="panel-title">Explore Your Own Images</span></div>
+    <div class="panel-body" id="uploadStep1">
+      <div class="dropzone" id="dzSearch">
+        <div class="icon">&#8593;</div>
+        <div id="dzSearchLabel">Click or drop an image to search &mdash; PNG, JPG, TIFF, BMP</div>
+        <div class="upload-hint">You'll select the target pattern from this same image next &mdash; no second upload needed.</div>
+        <input type="file" id="fileSearch" accept=".png,.jpg,.jpeg,.tif,.tiff,.bmp">
+      </div>
+      <div id="uploadError"></div>
+    </div>
+
+    <div class="panel-body" id="uploadStep2" style="display:none; padding-top:0;">
+      <div class="crop-note" id="cropNote">Drag a box around the pattern you want Drift-Sense to find elsewhere in this image. This selection becomes the reference template.</div>
+      <div class="stage-wrap" style="height:min(52vh, 520px); margin-top:8px;">
+        <canvas id="cropCanvas" class="stage-canvas"></canvas>
+        <div class="stage-badge">SELECT TARGET</div>
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-primary" id="btnCropConfirm">Use This Target</button>
+        <button class="btn btn-ghost" id="btnCropRestart">Choose Different Image</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== PIPELINE TRACKER (detailed) =================== -->
+  <div class="panel section-gap">
+    <div class="tracker" id="tracker"></div>
+  </div>
+
+  <!-- ===================== TOP: IMAGES SIDE BY SIDE (above the fold) ===== -->
+  <div class="top-grid">
+    <div class="panel">
+      <div class="panel-head">
+        <span class="panel-title">Reference &middot; Match Template</span>
+        <span class="image-tabs"><span>TEMPLATE</span></span>
+      </div>
+      <div class="panel-body">
+        <div class="stage-wrap" id="refWrap">
+          <canvas id="refCanvas" class="stage-canvas"></canvas>
+          <div class="stage-dims" id="refDims"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head">
+        <span class="panel-title">Search Image &middot; Live Candidate Field</span>
+        <button class="btn btn-ghost btn-sm" id="btnZoomReset">Reset View</button>
+      </div>
+      <div class="panel-body">
+        <div class="stage-wrap" id="searchWrap">
+          <canvas id="searchCanvas" class="stage-canvas"></canvas>
+          <div class="scanline" id="scanline"></div>
+          <div class="stage-dims" id="searchDims"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="small" id="legendLine" style="margin-top:10px;"></div>
+
+  <div class="btn-row">
+    <button class="btn btn-primary" id="btnRun" disabled>Run Drift-Sense</button>
+    <button class="btn btn-ghost" id="btnReset">Reset</button>
+    <button class="btn btn-ghost" id="btnAnother">Try Another Case</button>
+  </div>
+
+  <!-- ===================== BELOW THE FOLD ================================ -->
+  <div class="below-fold">
+    <div class="panel">
+      <div class="panel-head"><span class="panel-title">Live Pipeline Explanation</span></div>
+      <div class="panel-body">
+        <div class="feed" id="feed">
+          <div class="placeholder">Select a scenario and click Run Drift-Sense to watch the real backend execute.</div>
+        </div>
+      </div>
+    </div>
+
+    <div style="display:flex; flex-direction:column; gap:12px;">
+      <div class="panel">
+        <div class="panel-head"><span class="panel-title">Candidate Analysis</span></div>
+        <div class="panel-body" style="overflow-x:auto;">
+          <table class="ranktable" id="rankTable" style="display:none;">
+            <thead>
+              <tr>
+                <th>#</th><th>Location</th><th>NCC</th><th>ORB Inliers</th><th>Final Score</th>
+              </tr>
+            </thead>
+            <tbody id="rankBody"></tbody>
+          </table>
+          <div class="placeholder" id="rankPlaceholder">No candidates yet.</div>
+        </div>
+      </div>
+
+      <div class="panel" id="resultPanel" style="display:none;">
+        <div class="panel-head"><span class="panel-title">Result</span></div>
+        <div class="panel-body">
+          <div id="diagnosisBanner"></div>
+          <div class="result-grid" id="resultGrid"></div>
+          <div class="small" id="resultExplain"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="footer-note">DRIFT-SENSE &middot; classical CV pipeline (multi-scale NCC + ORB/RANSAC verification) &middot; every metric shown is produced by the real backend</div>
+</div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

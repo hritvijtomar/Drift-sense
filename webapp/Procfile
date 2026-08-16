@@ -1,0 +1,1 @@
+web: gunicorn --chdir webapp/backend -w 2 --threads 4 -b 0.0.0.0:$PORT --timeout 120 app:app

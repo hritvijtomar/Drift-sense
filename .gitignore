@@ -57,3 +57,6 @@ build/
 # Local test / profiling output
 .prof
 .profraw
+# Ablation working images are regenerable via evaluation/ablation.py; keep repo lean
+outputs/ablation/
+evaluation/ablation_log.txt

@@ -23,6 +23,22 @@ good CANDIDATES cheaply.
 import cv2
 import numpy as np
 
+# Default scale/angle sweep. Extracted to module-level constants (instead of
+# being inlined inside multiscale_ncc_candidates's default-argument
+# resolution) so other modules -- specifically the web app's
+# localization_service.py -- can read the real, currently-configured
+# reference:search scale relationship instead of hardcoding a guess.
+# NOTE: this is a pure refactor. The values are IDENTICAL to the original
+# inline constants (0.07-0.15, 9 steps; +-4 deg, 5 steps), so
+# multiscale_ncc_candidates(...) with no explicit scales/angles argument
+# produces numerically identical output to before this change (verified in
+# webapp/backend/verify_parity.py).
+DEFAULT_SCALE_MIN = 0.07
+DEFAULT_SCALE_MAX = 0.15
+DEFAULT_SCALE_STEPS = 9
+DEFAULT_ANGLE_RANGE_DEG = 4.0
+DEFAULT_ANGLE_STEPS = 5
+
 
 def _to_gray(img):
     if img.ndim == 3:
@@ -76,9 +92,9 @@ def multiscale_ncc_candidates(reference, search, scales=None, angles=None,
     search_gray = _to_gray(search)
 
     if scales is None:
-        scales = np.linspace(0.07, 0.15, 9)   # around the known ~10x relationship
+        scales = np.linspace(DEFAULT_SCALE_MIN, DEFAULT_SCALE_MAX, DEFAULT_SCALE_STEPS)   # around the known ~10x relationship
     if angles is None:
-        angles = np.linspace(-4, 4, 5)
+        angles = np.linspace(-DEFAULT_ANGLE_RANGE_DEG, DEFAULT_ANGLE_RANGE_DEG, DEFAULT_ANGLE_STEPS)
 
     H, W = search_gray.shape
     score_map = np.full((H, W), -1.0, dtype=np.float32)

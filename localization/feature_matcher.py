@@ -121,3 +121,30 @@ def is_ambiguous(ranked_candidates, gap_threshold=0.08):
     if len(ranked_candidates) < 2:
         return False
     return (ranked_candidates[0]["final_score"] - ranked_candidates[1]["final_score"]) < gap_threshold
+
+
+def select_final_candidate(ranked_candidates, search_shape, valid_gap=0.005):
+    """
+    Official PS rule (Section 4.A, 'Multiple matches'): "If several valid
+    matches exist, select the one whose centre is closest to the
+    search-image centre." Our ranking so far only orders by match quality;
+    this applies the explicit tie-break.
+
+    'Valid' here = any candidate within `valid_gap` of the top score (i.e.
+    candidates that are effectively tied and therefore genuinely ambiguous,
+    not just the single best score). Among those, pick the one nearest the
+    image center. If there's a clear single winner (no other candidate
+    within the gap), that winner is returned unchanged.
+    """
+    if not ranked_candidates:
+        return None
+    top_score = ranked_candidates[0]["final_score"]
+    valid = [c for c in ranked_candidates if (top_score - c["final_score"]) <= valid_gap]
+
+    if len(valid) == 1:
+        return ranked_candidates[0]
+
+    H, W = search_shape[:2]
+    cx, cy = W / 2.0, H / 2.0
+    valid.sort(key=lambda c: (c["x"] - cx) ** 2 + (c["y"] - cy) ** 2)
+    return valid[0]

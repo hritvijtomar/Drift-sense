@@ -1,16 +1,28 @@
 {
   "n_pairs": 30,
-  "n_correct": 14,
-  "accuracy": 0.4667,
+  "n_correct": 15,
+  "accuracy": 0.5,
   "tolerance_px": 50,
-  "mean_error_px": 231.23,
-  "mean_runtime_sec": 5.483,
+  "mean_error_px": 226.46,
+  "median_error_px": 89.6,
+  "worst_case_error_px": 748.49,
+  "mean_runtime_sec": 5.367,
+  "pass_rate_required_thresholds": {
+    "5": 0.5,
+    "4": 0.5,
+    "2": 0.5,
+    "1": 0.5
+  },
   "pass_rate_by_tolerance_px": {
-    "1": 0.4667,
-    "2": 0.4667,
-    "3": 0.4667,
-    "4": 0.4667,
-    "5": 0.4667,
-    "50": 0.4667
+    "1": 0.5,
+    "2": 0.5,
+    "3": 0.5,
+    "4": 0.5,
+    "5": 0.5,
+    "50": 0.5
+  },
+  "style_accuracy": {
+    "dram": 0.2,
+    "finfet": 0.8
   }
 }
