@@ -2,3 +2,5 @@ opencv-python==4.13.0.90
 numpy==2.4.4
 matplotlib==3.10.8
 streamlit
+
+Flask
