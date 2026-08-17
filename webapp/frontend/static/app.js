@@ -20,7 +20,7 @@ const state = {
   examples: [],
   currentExample: null,
   config: { reference_scale_range: [0.07, 0.15], recommended_reference_upscale_factor: 9.1, ambiguous_gap_threshold: 0.08, gt_match_tolerance_px: 15 },
-  upload: { refToken: null, searchToken: null, selfGT: null },
+  upload: { refToken: null, searchToken: null, selfGT: null, referenceScaleFactor: null },
   refImg: null,
   searchImg: null,
   candidates: [],
@@ -73,10 +73,10 @@ function setStage(stageKey, status, subText) {
 function trackerSubText(stage, status, data) {
   switch (stage) {
     case "load":
-      if (status === "complete") return `${data.search_shape.w}×${data.search_shape.h}px`;
+      if (status === "complete") return `${data.search_shape.w}Ã—${data.search_shape.h}px`;
       return "reading files\u2026";
     case "template_extraction":
-      return data.template_w ? `${data.template_w}×${data.template_h}px` : "";
+      return data.template_w ? `${data.template_w}Ã—${data.template_h}px` : "";
     case "candidate_generation":
       if (status === "complete") return `${data.candidate_count} candidates`;
       return "NCC sweep\u2026";
@@ -482,11 +482,34 @@ function runStream(url) {
   let streamEnded = false; // guards against onerror firing after we've already handled completion
 
   es.onmessage = (msg) => {
+    // A reset/example switch can close an older stream while its final event
+    // is already queued in the browser. Never let that stale event mutate the
+    // current run's UI.
+    if (state.es !== es) return;
+
     const ev = JSON.parse(msg.data);
     const { stage, status, message, data } = ev;
 
     setStage(stage, status, trackerSubText(stage, status, data));
     appendFeed(stage, status, message, data);
+
+    // The backend can terminate the SSE stream with a failed event without
+    // emitting a normal "result" event (for example after a defensive
+    // exception). Treat that as a terminal run state instead of letting
+    // EventSource reconnect and then incorrectly reporting "CONNECTION LOST".
+    if (status === "failed" && stage !== "result") {
+      streamEnded = true;
+      $("#scanline").classList.remove("active");
+      $("#resultPanel").style.display = "block";
+      $("#diagnosisBanner").innerHTML = `<div class="diagnosis-banner diag-genmiss">
+        <span class="dg-title">LOCALIZATION COULD NOT BE CONFIRMED</span>
+        ${message}</div>`;
+      $("#resultGrid").innerHTML = "";
+      $("#resultExplain").textContent = "";
+      es.close();
+      $("#btnRun").disabled = false;
+      return;
+    }
 
     if (stage === "candidate_generation") {
       $("#scanline").classList.toggle("active", status === "running");
@@ -538,7 +561,9 @@ function runStream(url) {
   };
 
   es.onerror = () => {
-    if (streamEnded) return; // stream already completed normally; a trailing close event is not an error
+    // Ignore late events from an EventSource that was deliberately closed
+    // because the user reset/switched examples and a newer run took over.
+    if (streamEnded || state.es !== es) return;
     streamEnded = true;
 
     // A true EventSource-level error (as opposed to a normal in-stream
@@ -576,7 +601,7 @@ $("#btnRun").addEventListener("click", () => {
     runStream(`/api/run/stream?mode=example&example_id=${encodeURIComponent(state.currentExample.id)}`);
   } else if (state.mode === "upload" && state.upload.refToken && state.upload.searchToken) {
     const g = state.upload.selfGT;
-    runStream(`/api/run/stream?mode=upload&reference_token=${encodeURIComponent(state.upload.refToken)}&search_token=${encodeURIComponent(state.upload.searchToken)}&self_gt_x=${g.x}&self_gt_y=${g.y}`);
+    runStream(`/api/run/stream?mode=upload&reference_token=${encodeURIComponent(state.upload.refToken)}&search_token=${encodeURIComponent(state.upload.searchToken)}&self_gt_x=${g.x}&self_gt_y=${g.y}&self_reference_factor=${encodeURIComponent(state.upload.referenceScaleFactor || state.config.recommended_reference_upscale_factor || 9.1)}`);
   }
 });
 $("#btnReset").addEventListener("click", resetPipeline);
@@ -613,7 +638,10 @@ let cropRect = null, cropDragging = false, cropStart = null;
 
 function wireDropzone(dzId, fileInputId, onFile) {
   const dz = $(dzId), input = $(fileInputId);
-  dz.addEventListener("click", () => input.click());
+  dz.addEventListener("click", () => {
+    if (dz.classList.contains("uploading")) return;
+    input.click();
+  });
   dz.addEventListener("dragover", (e) => { e.preventDefault(); dz.classList.add("drag"); });
   dz.addEventListener("dragleave", () => dz.classList.remove("drag"));
   dz.addEventListener("drop", (e) => {
@@ -633,6 +661,12 @@ async function uploadFile(file) {
 }
 
 wireDropzone("#dzSearch", "#fileSearch", async (file) => {
+  const dz = $("#dzSearch");
+  if (dz.classList.contains("uploading")) return;
+
+  dz.classList.add("uploading");
+  dz.setAttribute("aria-busy", "true");
+
   try {
     $("#uploadError").innerHTML = "";
     const data = await uploadFile(file);
@@ -640,12 +674,21 @@ wireDropzone("#dzSearch", "#fileSearch", async (file) => {
 
     pendingCropImage = new Image();
     pendingCropImage.onload = () => {
+      dz.classList.remove("uploading");
+      dz.removeAttribute("aria-busy");
       $("#uploadStep1").style.display = "none";
       $("#uploadStep2").style.display = "block";
       setupCropCanvas(true);
     };
+    pendingCropImage.onerror = () => {
+      dz.classList.remove("uploading");
+      dz.removeAttribute("aria-busy");
+      $("#uploadError").innerHTML = `<div class="error-banner">The uploaded image could not be loaded for cropping.</div>`;
+    };
     pendingCropImage.src = data.url;
   } catch (err) {
+    dz.classList.remove("uploading");
+    dz.removeAttribute("aria-busy");
     $("#uploadError").innerHTML = `<div class="error-banner">${err.message}</div>`;
   }
 });
@@ -712,68 +755,102 @@ $("#btnCropConfirm").addEventListener("click", async () => {
     $("#uploadError").innerHTML = `<div class="error-banner">Drag a box around a pattern first.</div>`;
     return;
   }
+
+  const btn = $("#btnCropConfirm");
+  if (btn.disabled) return;
+
   $("#uploadError").innerHTML = "";
-  const fit = cropFit();
-  const nx = (cropRect.x - fit.ox) / fit.scale;
-  const ny = (cropRect.y - fit.oy) / fit.scale;
-  const nw = cropRect.w / fit.scale;
-  const nh = cropRect.h / fit.scale;
+  btn.disabled = true;
+  const originalLabel = btn.textContent;
+  btn.textContent = "Preparing target…";
 
-  // Ground truth by construction: the crop's center in the ORIGINAL
-  // (search) image's pixel space really is the target location -- not an
-  // estimate, since we cropped it directly out of that same image.
-  const selfGT = { x: nx + nw / 2, y: ny + nh / 2 };
+  try {
+    const fit = cropFit();
+    const nx = (cropRect.x - fit.ox) / fit.scale;
+    const ny = (cropRect.y - fit.oy) / fit.scale;
+    const nw = cropRect.w / fit.scale;
+    const nh = cropRect.h / fit.scale;
 
-  // The backend assumes the reference is a ~1/scale zoomed-in depiction of
-  // the target (see /api/config -> reference_scale_range, ~0.07-0.15x).
-  // A same-resolution crop of the search image is at the WRONG scale for
-  // that convention and will not be found. So we upscale the crop by the
-  // backend's own recommended factor before sending it as the reference --
-  // this makes the crop's pixel content match what the pipeline expects a
-  // "reference chip" to look like, without fabricating any new content.
-  const factor = state.config.recommended_reference_upscale_factor || 9.1;
-  const off = document.createElement("canvas");
-  off.width = Math.max(8, Math.round(nw * factor));
-  off.height = Math.max(8, Math.round(nh * factor));
-  const octx = off.getContext("2d");
-  octx.imageSmoothingEnabled = true;
-  octx.imageSmoothingQuality = "high";
-  octx.drawImage(pendingCropImage, nx, ny, nw, nh, 0, 0, off.width, off.height);
+    // Ground truth by construction: the crop's center in the ORIGINAL
+    // (search) image's pixel space really is the target location -- not an
+    // estimate, since we cropped it directly out of that same image.
+    const selfGT = { x: nx + nw / 2, y: ny + nh / 2 };
 
-  off.toBlob(async (blob) => {
-    try {
-      const file = new File([blob], "target_reference.png", { type: "image/png" });
-      const data = await uploadFile(file);
-      state.upload.refToken = data.token;
-      state.upload.selfGT = selfGT;
+    // The backend expects the reference to be a zoomed-in depiction of the
+    // target. Use its recommended scale, but cap the generated reference
+    // dimensions so a large user crop cannot allocate a huge browser canvas
+    // or PNG and exhaust memory.
+    const factor = state.config.recommended_reference_upscale_factor || 9.1;
+    const MAX_REFERENCE_SIDE = 1600;
+    const requestedW = Math.max(8, Math.round(nw * factor));
+    const requestedH = Math.max(8, Math.round(nh * factor));
+    const capScale = Math.min(
+      1,
+      MAX_REFERENCE_SIDE / Math.max(requestedW, requestedH)
+    );
+    const outW = Math.max(8, Math.round(requestedW * capScale));
+    const outH = Math.max(8, Math.round(requestedH * capScale));
 
-      state.refImg = new Image();
-      state.refImg.onload = drawReference;
-      state.refImg.src = data.url;
+    const off = document.createElement("canvas");
+    off.width = outW;
+    off.height = outH;
 
-      state.searchImg = pendingCropImage;
-      drawSearch();
+    const octx = off.getContext("2d");
+    octx.imageSmoothingEnabled = true;
+    octx.imageSmoothingQuality = "high";
+    octx.drawImage(
+      pendingCropImage,
+      nx, ny, nw, nh,
+      0, 0, outW, outH
+    );
 
-      state.groundTruth = null; // hidden until the real result is computed
-      $("#legendLine").innerHTML =
-        `<span style="color:${MARKER_COLORS.candidate}">\u25a2</span> raw NCC candidate &nbsp; ` +
-        `<span style="color:${MARKER_COLORS.verified}">\u25a2</span> verified &amp; ranked &nbsp; ` +
-        `<span style="color:${MARKER_COLORS.selected}">\u25a2</span> selected &nbsp; ` +
-        `<span style="color:${MARKER_COLORS.gt}">+</span> your target (ground truth) &nbsp; ` +
-        `<span style="color:${MARKER_COLORS.error}">- -</span> error vector`;
+    btn.textContent = "Uploading…";
 
-      $("#uploadPanel").style.display = "none";
-      $("#btnRun").disabled = false;
-    } catch (err) {
-      $("#uploadError").innerHTML = `<div class="error-banner">${err.message}</div>`;
-    }
-  }, "image/png");
+    const blob = await new Promise((resolve, reject) => {
+      off.toBlob((result) => {
+        if (result) resolve(result);
+        else reject(new Error("Could not prepare the selected target image."));
+      }, "image/png");
+    });
+
+    const file = new File([blob], "target_reference.png", { type: "image/png" });
+    const data = await uploadFile(file);
+
+    state.upload.refToken = data.token;
+    state.upload.selfGT = selfGT;
+    // Preserve the actual factor after the 1600px safety cap. The upload-only
+    // matcher uses this to search tightly around the known crop scale.
+    state.upload.referenceScaleFactor = (outW / nw + outH / nh) / 2;
+
+    state.refImg = new Image();
+    state.refImg.onload = drawReference;
+    state.refImg.src = data.url;
+
+    state.searchImg = pendingCropImage;
+    drawSearch();
+
+    state.groundTruth = null; // hidden until the real result is computed
+    $("#legendLine").innerHTML =
+      `<span style="color:${MARKER_COLORS.candidate}">\u25a2</span> raw NCC candidate &nbsp; ` +
+      `<span style="color:${MARKER_COLORS.verified}">\u25a2</span> verified &amp; ranked &nbsp; ` +
+      `<span style="color:${MARKER_COLORS.selected}">\u25a2</span> selected &nbsp; ` +
+      `<span style="color:${MARKER_COLORS.gt}">+</span> your target (ground truth) &nbsp; ` +
+      `<span style="color:${MARKER_COLORS.error}">- -</span> error vector`;
+
+    $("#uploadPanel").style.display = "none";
+    $("#btnRun").disabled = false;
+  } catch (err) {
+    $("#uploadError").innerHTML = `<div class="error-banner">${err.message}</div>`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = originalLabel;
+  }
 });
 
 $("#btnCropRestart").addEventListener("click", () => {
   pendingCropImage = null;
   cropRect = null;
-  state.upload = { refToken: null, searchToken: null, selfGT: null };
+  state.upload = { refToken: null, searchToken: null, selfGT: null, referenceScaleFactor: null };
   $("#uploadStep2").style.display = "none";
   $("#uploadStep1").style.display = "block";
   $("#fileSearch").value = "";

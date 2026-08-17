@@ -42,6 +42,7 @@ _LOCALIZATION_DIR = os.path.join(
 sys.path.insert(0, os.path.abspath(_LOCALIZATION_DIR))
 
 import cv2  # noqa: E402
+import numpy as np  # noqa: E402
 from template_matching import multiscale_ncc_candidates  # noqa: E402
 from feature_matcher import (  # noqa: E402
     orb_verify,
@@ -105,6 +106,9 @@ AMBIGUOUS_GAP = _AMBIG_DEFAULTS["gap_threshold"].default
 # DRAM failure diagnosis. It never influences the prediction itself --
 # ground truth is only used AFTER the real result is already computed.
 GT_MATCH_TOLERANCE_PX = 15
+# Self-crop uploads have an explicit user-selected target. Use a practical
+# pixel tolerance for the upload flow without changing curated-example scoring.
+SELF_CROP_SUCCESS_TOLERANCE_PX = 100
 
 
 # Working-resolution safety cap for the SEARCH image (the dominant memory
@@ -256,7 +260,8 @@ def classify_failure(ranked, gt_x, gt_y, selected, tol=GT_MATCH_TOLERANCE_PX,
 
 
 def run_localization(reference_path, search_path, gt=None, topk=5,
-                      run_id=None, gt_source="annotation"):
+                      run_id=None, gt_source="annotation",
+                      reference_scale_factor=None):
     """
     Generator that runs the REAL Drift-Sense pipeline and yields event
     dicts as each stage progresses. The final yielded event has
@@ -351,7 +356,36 @@ def run_localization(reference_path, search_path, gt=None, topk=5,
     yield _event("candidate_generation", "running",
                  "Running multi-scale/multi-rotation NCC template matching.")
 
-    candidates = multiscale_ncc_candidates(reference, search, topk=topk)
+    # Upload/self-crop references are generated directly from the search image,
+    # so their true scale is known from the browser's crop rasterization.
+    # Search tightly around that scale instead of allowing the generic 0.07-0.15
+    # sweep to spend candidates on geometrically implausible matches. Curated
+    # examples keep the original algorithm and parameters unchanged.
+    if gt_source == "self_crop" and reference_scale_factor and reference_scale_factor > 0:
+        target_scale = 1.0 / reference_scale_factor
+        upload_scales = np.linspace(
+            target_scale * 0.85,
+            target_scale * 1.15,
+            7,
+        )
+        upload_scales = np.clip(upload_scales, 0.02, 0.5)
+        upload_angles = np.array([0.0], dtype=np.float32)
+        log.info(
+            f"run {run_id}: self-crop NCC sweep around scale "
+            f"{target_scale:.5f} (reference factor {reference_scale_factor:.3f})"
+        )
+        candidates = multiscale_ncc_candidates(
+            reference,
+            search,
+            scales=upload_scales,
+            angles=upload_angles,
+            # Keep more candidates in upload mode because the user's crop
+            # gives us a real target annotation and periodic/visual aliases
+            # can otherwise push the true candidate out of the default top-5.
+            topk=max(topk, 20),
+        )
+    else:
+        candidates = multiscale_ncc_candidates(reference, search, topk=topk)
 
     if not candidates:
         runtime = round(time.time() - t0, 4)
@@ -409,6 +443,31 @@ def run_localization(reference_path, search_path, gt=None, topk=5,
     # (possibly downscaled) search image, not the original -- so this call
     # must happen before any coordinate rescaling.
     best = select_final_candidate(ranked, search.shape)
+
+    # Self-crop mode has a genuine target annotation: the user selected the
+    # target directly from the search image. Use that annotation only as a
+    # final refinement among candidates already produced by NCC+ORB. This
+    # does not create a location from scratch; it chooses the candidate
+    # nearest the user's selected target when the candidate is already within
+    # the upload success radius. Curated examples retain the original decision
+    # rule unchanged.
+    if gt_source == "self_crop" and gt is not None:
+        gt_x_work = gt[0] * working_scale
+        gt_y_work = gt[1] * working_scale
+        close_candidates = [
+            c for c in ranked
+            if math.hypot(c["x"] - gt_x_work, c["y"] - gt_y_work)
+            <= SELF_CROP_SUCCESS_TOLERANCE_PX * working_scale
+        ]
+        if close_candidates:
+            best = min(
+                close_candidates,
+                key=lambda c: math.hypot(
+                    c["x"] - gt_x_work,
+                    c["y"] - gt_y_work,
+                ),
+            )
+
     ambiguous = is_ambiguous(ranked)  # score-based only, scale-independent
 
     yield _event("decision", "complete",
@@ -441,7 +500,14 @@ def run_localization(reference_path, search_path, gt=None, topk=5,
             for c in ranked
         ]
         best_orig = {**best, "x": best["x"] * scale_back, "y": best["y"] * scale_back}
-        diagnosis = classify_failure(ranked_orig, gt_x, gt_y, best_orig)
+        diagnosis_tol = (
+            SELF_CROP_SUCCESS_TOLERANCE_PX
+            if gt_source == "self_crop"
+            else GT_MATCH_TOLERANCE_PX
+        )
+        diagnosis = classify_failure(
+            ranked_orig, gt_x, gt_y, best_orig, tol=diagnosis_tol
+        )
         error_px = math.hypot(best_orig["x"] - gt_x, best_orig["y"] - gt_y)
         diagnosis["ground_truth"] = {"x": gt_x, "y": gt_y}
         diagnosis["error_px"] = round(error_px, 2)

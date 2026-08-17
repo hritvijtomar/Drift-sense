@@ -381,11 +381,48 @@ canvas.stage-canvas {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 12px;
+  align-items: stretch;
 }
-@media (max-width: 900px) { .below-fold { grid-template-columns: 1fr; } }
+
+/* The right side is a stack (Candidate Analysis + Result), while the
+   explanation panel is the left grid item. Let the RIGHT stack determine
+   the grid row's natural height; the left feed must never contribute its
+   full content height to that calculation. */
+.below-fold {
+  align-items: stretch;
+}
+
+.below-fold > .panel:first-child {
+  min-height: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.below-fold > .panel:first-child > .panel-body {
+  min-height: 0;
+  flex: 1 1 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.below-fold > .panel:first-child .feed {
+  min-height: 0;
+  height: auto;
+  flex: 1 1 0;
+  overflow-y: auto;
+}
+
+@media (max-width: 900px) {
+  .below-fold { grid-template-columns: 1fr; }
+  .below-fold > .panel:first-child {
+    height: auto;
+  }
+}
 
 /* live explanation feed */
-.feed { max-height: 320px; overflow-y: auto; display: flex; flex-direction: column; gap: 7px; }
+.feed { min-height: 0; max-height: none; overflow-y: auto; display: flex; flex-direction: column; gap: 7px; }
 .feed-item { font-size: 12.5px; line-height: 1.5; padding: 9px 11px; border-radius: var(--r-sm); background: var(--panel-2); border-left: 2px solid var(--hairline-2); }
 .feed-item .fi-stage { font-family: var(--mono); font-size: 9.5px; color: var(--accent); letter-spacing: 0.05em; margin-bottom: 3px; text-transform: uppercase; }
 .feed-item .fi-msg { color: var(--text-0); }
@@ -494,6 +531,18 @@ table.ranktable tr:hover td { background: rgba(255,255,255,0.03); }
 }
 .dropzone:hover, .dropzone.drag { border-color: var(--accent); background: var(--accent-soft); }
 .dropzone input { display: none; }
+.dropzone.uploading {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  cursor: progress;
+}
+.dropzone.uploading .icon {
+  animation: uploadPulse 1.1s ease-in-out infinite;
+}
+@keyframes uploadPulse {
+  0%, 100% { opacity: 0.35; transform: scale(1); }
+  50% { opacity: 0.85; transform: scale(1.04); }
+}
 .dropzone .icon { font-size: 22px; margin-bottom: 6px; opacity: 0.5; }
 .upload-hint { font-family: var(--mono); font-size: 10px; color: var(--text-2); margin-top: 6px; }
 .crop-note {

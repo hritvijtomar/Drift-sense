@@ -26,6 +26,7 @@ import uuid
 import time
 import shutil
 import tempfile
+import traceback
 
 from flask import Flask, request, Response, jsonify, send_from_directory, abort, stream_with_context
 
@@ -187,6 +188,15 @@ def upload():
                 return jsonify({"error": f"Image dimensions out of supported range: {w}x{h}px."}), 400
             dest_path = os.path.join(UPLOAD_DIR, f"{token}.png")
             im.save(dest_path, format="PNG")
+    except Image.DecompressionBombError:
+        # Pillow raises this for images whose pixel count exceeds its own
+        # decompression-bomb safety threshold. Catch it explicitly so an
+        # oversized upload becomes a clean 400 response instead of a raw 500.
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+        return jsonify({
+            "error": "Image is too large to process (exceeds decompression-bomb safety limit)."
+        }), 400
     except (UnidentifiedImageError, OSError, ValueError) as e:
         if os.path.exists(tmp_path):
             os.remove(tmp_path)
@@ -257,6 +267,10 @@ def run_stream():
     topk = int(request.args.get("topk", 5))
     topk = max(1, min(topk, 15))
 
+    # Always initialize this before the mode branches. The streaming
+    # generator closes over it, so it must exist for curated examples too.
+    self_reference_factor = None
+
     if mode == "example":
         example_id = request.args.get("example_id", "")
         ex = examples_registry.get_example(example_id)
@@ -286,13 +300,26 @@ def run_stream():
                 gt = (float(sgx), float(sgy))
             except ValueError:
                 gt = None
+
+        # The browser knows the actual reference upscale factor after the
+        # 1600px safety cap. Pass it through only for the self-crop flow so
+        # that upload-mode NCC searches tightly around the true crop scale.
+        self_reference_factor = None
+        srf = request.args.get("self_reference_factor")
+        if srf is not None:
+            try:
+                value = float(srf)
+                if value > 0:
+                    self_reference_factor = value
+            except ValueError:
+                self_reference_factor = None
     else:
         return jsonify({"error": f"Unknown mode '{mode}'."}), 400
 
     def generate():
         try:
             gt_source = "self_crop" if mode == "upload" else "annotation"
-            for ev in run_localization(reference_path, search_path, gt=gt, topk=topk, gt_source=gt_source):
+            for ev in run_localization(reference_path, search_path, gt=gt, topk=topk, gt_source=gt_source, reference_scale_factor=self_reference_factor):
                 yield _sse_format(ev)
         except PipelineError as e:
             yield _sse_format({
@@ -303,13 +330,17 @@ def run_stream():
                 "data": {},
             })
         except Exception as e:  # pragma: no cover - defensive backstop
-            # Never leak a raw traceback to the browser.
+            traceback.print_exc()
+
             yield _sse_format({
                 "stage": "unknown",
                 "status": "failed",
-                "message": "An internal error prevented localization from completing.",
+                "message": f"Internal error: {type(e).__name__}: {e}",
                 "timestamp": time.time(),
-                "data": {"error_type": type(e).__name__},
+                "data": {
+                    "error_type": type(e).__name__,
+                    "error": str(e),
+                },
             })
 
     return Response(
