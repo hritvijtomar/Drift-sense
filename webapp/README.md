@@ -239,7 +239,37 @@ The app is a single Flask process serving both the API and the static
 frontend -- no separate frontend deploy, no database, no external
 services.
 
-### Option A: Docker (recommended)
+### Current production deployment: Render, native Python runtime
+
+The live deployment (`https://drift-sense-g88m.onrender.com` at time of
+writing) uses Render's **native Python runtime**, not the Dockerfile.
+This matters because Render's native runtime installs from the
+**repository-root `requirements.txt`**, not `webapp/requirements.txt` --
+both files are kept in sync on purpose (see the comments in each), but
+if you ever change one, change both.
+
+Deployment config is now committed as code in `render.yaml` (a Render
+"Blueprint") instead of living only in the dashboard's Start Command
+field, so it survives in Git history and a fresh service can be
+recreated from the repo alone:
+
+- **Build command**: `pip install -r requirements.txt`
+- **Start command**: `gunicorn --chdir webapp/backend --bind 0.0.0.0:$PORT --workers 1 --threads 1 --timeout 180 app:app`
+- **Health check path**: `/api/health`
+
+To deploy/redeploy: in the Render dashboard, **New +** -> **Blueprint**,
+point it at this repo. If a service already exists under the same
+name, Render's Settings -> Blueprint tab will offer to sync this file
+onto it.
+
+`--workers 1 --threads 1` is deliberate, not a placeholder -- see
+"Memory & the 512MB limit" below before changing it.
+
+### Alternative: Docker
+
+`webapp/Dockerfile` is also maintained and works, for platforms that
+prefer/require a container image (Fly.io, Google Cloud Run, AWS App
+Runner, Railway, etc.):
 
 ```bash
 # from the repository root (build context matters -- must include
@@ -248,20 +278,11 @@ docker build -f webapp/Dockerfile -t drift-sense .
 docker run -p 8000:8000 drift-sense
 ```
 
-Then open `http://localhost:8000`. Push the image to any container
-host (Fly.io, Render, Google Cloud Run, AWS App Runner, etc.) -- no
-environment variables are required beyond the platform's `$PORT`.
-
-### Option B: Procfile platforms (Render / Railway / Heroku-style)
-
-1. Set the build command: `pip install -r requirements.txt -r webapp/requirements.txt`
-2. `webapp/Procfile` supplies the start command:
-   `gunicorn --chdir webapp/backend -w 2 --threads 4 -b 0.0.0.0:$PORT --timeout 120 app:app`
-3. No environment variables are required. The platform's `$PORT` is
-   picked up automatically.
-4. Make sure the platform includes the whole repository (not just
-   `webapp/`) in the build -- the service imports directly from
-   `localization/` and reads images from `outputs/`.
+Unlike the Render-native path, the Docker image regenerates the full
+30-pair dataset at build time (`generate_dataset.py`, seeded and
+deterministic) rather than relying on the 5 curated pairs being
+committed to Git -- either approach produces byte-identical curated
+images, so this is purely a build-time-vs-git-size tradeoff.
 
 ### CORS / networking
 
@@ -278,16 +299,97 @@ filename and are cleaned up on a 1-hour TTL on the next upload
 request. On most container platforms this directory is ephemeral,
 which is the desired behavior here (no user data is meant to persist).
 
-### Deployment status in this handoff
+---
 
-This project was built and fully tested in a sandboxed environment
-**without outbound network access**, so an actual public deployment
-was not performed by this Claude. Everything above was verified
-locally (Flask dev server, all API endpoints, the full SSE event
-stream, error paths, and CLI parity). The project is deployment-ready;
-an environment with registry/platform access should be able to follow
-Option A or B directly. See `CLAUDE_HANDOFF.md` for exactly what
-remains to be done.
+## 6a. Memory & the 512MB limit
+
+Render's Free tier caps a service at 512MB RSS; exceeding it gets the
+process killed ("Ran out of memory... while running your code" in
+Render's event log), which surfaces to the browser as a mid-stream 502
+on `/api/run/stream`.
+
+**Root cause, found by profiling, not guessing:** `multiscale_ncc_candidates`
+(`localization/template_matching.py`) tracks, per pixel of the search
+image, which of the 45 (scale x angle) combinations currently has the
+best NCC score there. The original implementation stored this as a
+Python tuple `(scale, angle, w, h)` in an `HxW`, `dtype=object` NumPy
+array, written via a **Python-level `for y, x in zip(*np.where(mask))`
+loop** -- for a search image of `H*W` pixels, that's up to `H*W`
+individual Python tuple allocations, repeated up to 45 times (once per
+scale/angle combination), since on early iterations most of the image
+still "wins" against the initial `-1` sentinel score.
+
+Measured directly (`resource.getrusage`, not estimated) on a synthetic
+pair matching the real production failure's reported dimensions
+(reference 7994x5810, search 3848x2160 = 8.3 megapixels):
+
+| | peak RSS | time |
+|---|---|---|
+| Original (Python-loop + object array) | **931 MB** | 31.3s |
+| Vectorized fix (below) | **343 MB** | 14.9s |
+
+**The fix**: replaced the per-pixel Python loop and `dtype=object` array
+with a small integer "winner index" map (`dtype=int32`) updated via a
+single vectorized boolean-mask assignment per (scale, angle) --
+`sub_winner[mask] = combo_idx` -- plus a short Python list of the 45
+`(scale, angle, w, h)` combos looked up by index only for the final
+top-K peaks (at most `topk`, not `H*W`, tuple constructions). This is
+the **same algorithm** -- same score comparisons, same non-max
+suppression, same tie-break -- just without per-pixel Python object
+churn. Verified bit-for-bit identical against the original
+implementation on **all 30 dataset pairs** before merging (every
+candidate's x, y, score, scale, angle, w, h matched exactly); see
+`localization/template_matching.py`'s docstring for the full
+before/after comparison methodology.
+
+**Defense in depth beyond the fix**: `webapp/backend/app.py` allows
+uploads up to 8000px per side (64 megapixels) -- 8x larger than the
+already-fixed 8.3MP case above, which would still risk exceeding
+512MB even after vectorization. `localization_service.py` adds a
+`MAX_SEARCH_PIXELS = 6_000_000` working-resolution cap: if the
+uploaded search image exceeds it, **both** the reference and search
+images are downscaled by the same factor (preserving the algorithm's
+assumed reference:search scale relationship -- see section 3a) before
+running the pipeline, and every coordinate in every SSE event is
+scaled back to the ORIGINAL image's pixel space before being sent to
+the browser, so the API/frontend contract never changes and displayed
+coordinates are always correct. Verified end-to-end with a planted,
+precisely-known target in a synthetic 24-megapixel image: the pipeline
+correctly reported the exact original-image coordinates (0.0px error)
+at 260MB peak RSS. The absolute worst case the upload endpoint allows
+(8000x8000, 64MP) was also tested and peaked at 242MB.
+
+Every curated example (1000x1000 = 1 megapixel) is far under this cap
+and takes the untouched `scale_back=1.0` code path, so none of this
+changes curated-example behavior -- confirmed via `verify_parity.py`
+and by re-running the DRAM diagnosis reproduction (section 4) after
+these changes; results were unchanged.
+
+**Gunicorn workers/threads**: production runs `--workers 1 --threads 1`.
+This is deliberate: N workers or threads means up to N large-image
+localization runs could execute *concurrently* within the memory
+budget, multiplying peak RSS by N. A worker process duplicates the
+entire Python/OpenCV/Flask baseline; a thread only costs the memory of
+the request actually in flight, so if you move to a larger instance,
+raise `--threads` before `--workers`.
+
+**Observability**: `localization_service.py` logs one line at the start
+and end of every run (image sizes, whether downscaling engaged, runtime,
+peak RSS, result summary) via a `driftsense.localization` logger to
+stderr, which Render/Gunicorn capture into the service's log stream
+automatically -- no per-candidate/per-scale spam, just enough to
+diagnose a future slow or memory-heavy request without needing to
+reproduce it blind.
+
+### If 512MB genuinely isn't enough later
+
+The fixes above make the current classical CV pipeline fit comfortably
+within 512MB for any input the upload endpoint accepts. If a future ML
+model (mentioned as a possible next step) needs meaningfully more
+memory than this, that's a different, larger budget question than
+what was fixed here -- the honest guidance is to size the instance to
+the model's actual measured footprint (the same `resource.getrusage`
+technique used above works for that too) rather than guessing.
 
 ---
 

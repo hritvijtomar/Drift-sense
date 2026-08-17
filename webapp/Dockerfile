@@ -29,6 +29,16 @@ RUN python3 generate_dataset.py --out_dir outputs --n_pairs 30 --seed 42
 ENV PORT=8000
 EXPOSE 8000
 
-# 2 workers keep memory bounded; each localization run is CPU-bound and
-# takes a few seconds, so avoid oversubscribing on small deployment tiers.
-CMD ["sh", "-c", "gunicorn --chdir webapp/backend -w 2 --threads 4 -b 0.0.0.0:${PORT} --timeout 120 app:app"]
+# 1 worker, 1 thread: this is a memory-constrained deployment (Render Free
+# = 512MB). A single localization run on a large uploaded image can peak
+# around ~250-350MB by itself (see webapp/README.md "Memory & the 512MB
+# limit" for the measurements behind this number). Gunicorn threads/workers
+# share -- or in the worker case, duplicate -- that budget: N threads or
+# workers means up to N of these large-image runs could execute
+# CONCURRENTLY, multiplying peak memory by N. Since this is a demo
+# deployment (not a high-traffic service), we deliberately process one
+# request at a time rather than risk an OOM kill under concurrent load.
+# If you move to a larger instance, --threads can be raised safely (each
+# thread only costs the memory of a request actually in flight, unlike
+# --workers which duplicates the whole Python/OpenCV/Flask baseline).
+CMD ["sh", "-c", "gunicorn --chdir webapp/backend --bind 0.0.0.0:${PORT} --workers 1 --threads 1 --timeout 180 app:app"]

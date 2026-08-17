@@ -1,8 +1,19 @@
+# Core CV/localization dependencies (used by localize.py, the CLI, and
+# webapp/backend/localization_service.py -- see verify_parity.py).
 opencv-python==4.13.0.90
 numpy==2.4.4
 matplotlib==3.10.8
-streamlit
 
-Flask
+# Web app (webapp/backend/app.py). IMPORTANT: Render's "Native Environment"
+# Python service (the currently configured deployment -- see webapp/README.md
+# "Deployment" section) installs from THIS file, not webapp/requirements.txt.
+# Kept in sync with webapp/requirements.txt's pins on purpose -- if you
+# change one, change both.
+Flask==3.1.3
+gunicorn==23.0.0
 
-gunicorn
+# NOTE: a "streamlit" line was here from an earlier, abandoned Streamlit
+# deployment attempt (see Git history: "Add Streamlit dependency for
+# deployment"). Removed -- the app is Flask/Gunicorn only, streamlit is not
+# imported anywhere in the codebase, and leaving it in only slows down
+# every future `pip install` / Render build for no benefit.

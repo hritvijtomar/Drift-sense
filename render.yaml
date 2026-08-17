@@ -1,0 +1,37 @@
+# Render Blueprint (Infrastructure as Code) for Drift-Sense.
+#
+# Why this file exists: the deployment history for this project involved
+# several rounds of manually editing the Start Command in the Render
+# dashboard (Streamlit -> Flask/Gunicorn, worker/thread tuning, etc.).
+# That works, but it's invisible to Git and easy to lose track of or
+# accidentally revert. Committing the actual deploy configuration here
+# means `git log` shows every change to it, and a fresh Render service can
+# be recreated from this file alone (Render calls this a "Blueprint").
+#
+# To use: in the Render dashboard, "New +" -> "Blueprint" -> point at this
+# repo. Render will read this file instead of asking you to click through
+# the manual setup. If a service with the same `name` already exists,
+# Render will offer to sync this Blueprint onto it (Settings -> Blueprint).
+#
+# This deploys with Render's native Python runtime (not the Docker path --
+# see webapp/Dockerfile for that alternative, which is also still valid
+# but not what's wired up here) and installs from the ROOT
+# requirements.txt, matching how this project is actually configured to
+# deploy today.
+services:
+  - type: web
+    name: drift-sense
+    runtime: python
+    plan: free
+    buildCommand: "pip install -r requirements.txt"
+    # workers=1, threads=1: deliberate, not a default. See webapp/README.md
+    # "Memory & the 512MB limit" -- this is a memory-constrained deployment
+    # and concurrent large-image requests would multiply peak memory per
+    # extra worker/thread. --timeout 180 gives large uploads (up to the
+    # 64-megapixel cap enforced in webapp/backend/app.py) enough headroom;
+    # measured worst case locally was ~9s at ~242MB peak RSS.
+    startCommand: "gunicorn --chdir webapp/backend --bind 0.0.0.0:$PORT --workers 1 --threads 1 --timeout 180 app:app"
+    healthCheckPath: /api/health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9

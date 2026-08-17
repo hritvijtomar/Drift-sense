@@ -30,9 +30,31 @@ tmp/
 temp/
 experiments/_tmp/
 
-# Generated image data
+# Generated image data (the full 30-pair dataset -- kept out of git,
+# ~130MB total, regenerable via `python3 generate_dataset.py`).
+#
+# EXCEPTION: the 5 curated pairs the deployed web app actually serves
+# (webapp/backend/examples.py::CURATED) are explicitly un-ignored below.
+# They were previously added with `git add -f`, which works but is a trap:
+# a future `git add outputs/` looks like it should pick up any new/changed
+# curated pair but silently won't, because the broad *.png rule above still
+# wins for anything not explicitly negated. Listing them here means the
+# curated set is self-maintaining and the exception is visible in the one
+# place someone would think to look, instead of only living in shell
+# history. If you add a new curated example to examples.py, add its two
+# PNGs here too.
 outputs/reference/*.png
 outputs/search/*.png
+!outputs/reference/dram_002_ref.png
+!outputs/reference/dram_018_ref.png
+!outputs/reference/dram_020_ref.png
+!outputs/reference/finfet_005_ref.png
+!outputs/reference/finfet_009_ref.png
+!outputs/search/dram_002_search.png
+!outputs/search/dram_018_search.png
+!outputs/search/dram_020_search.png
+!outputs/search/finfet_005_search.png
+!outputs/search/finfet_009_search.png
 
 # Generated datasets / large local artifacts
 outputs/generated/

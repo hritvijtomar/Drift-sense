@@ -34,6 +34,7 @@ import time
 import math
 import inspect
 import uuid
+import logging
 
 _LOCALIZATION_DIR = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "..", "..", "localization"
@@ -48,6 +49,44 @@ from feature_matcher import (  # noqa: E402
     is_ambiguous,
     select_final_candidate,
 )
+
+# Lightweight, low-volume diagnostics: one line per run (start) and one line
+# per run (end, with timing/memory). Gunicorn/Render capture stderr into the
+# service's log stream automatically, so this is enough to diagnose a
+# future OOM or slow-request report without needing to reproduce it blind.
+# Deliberately NOT verbose (no per-candidate/per-scale logging) so normal
+# traffic doesn't spam production logs.
+log = logging.getLogger("driftsense.localization")
+if not log.handlers:
+    _handler = logging.StreamHandler(sys.stderr)
+    _handler.setFormatter(logging.Formatter("[driftsense] %(message)s"))
+    log.addHandler(_handler)
+    log.setLevel(logging.INFO)
+
+try:
+    import resource  # POSIX only (Linux/Mac) -- Render containers are Linux, fine here.
+    _HAVE_RESOURCE = True
+except ImportError:  # pragma: no cover -- e.g. native Windows dev environment
+    _HAVE_RESOURCE = False
+
+
+def _peak_rss_mb():
+    """Best-effort peak resident memory of this process, in MB. Returns
+    None if unavailable (non-POSIX). ru_maxrss is KB on Linux, bytes on
+    macOS -- this assumes Linux, which is what Render runs.
+
+    NOTE: this is the process's cumulative high-water mark since it
+    started, not an isolated per-request measurement (Python/the OS don't
+    make the latter easy to get cheaply). With workers=1, threads=1 (see
+    webapp/Procfile), requests are handled one at a time, so in practice
+    this number after a run is a reasonable proxy for "the worst this
+    worker has seen so far" -- exactly the signal you want when trying to
+    figure out whether a particular upload is what pushed a worker close
+    to the platform's memory limit.
+    """
+    if not _HAVE_RESOURCE:
+        return None
+    return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024.0
 
 # Pull the algorithm's own tunable constants from the real function
 # signatures rather than re-hardcoding them here, so this service can
@@ -66,6 +105,24 @@ AMBIGUOUS_GAP = _AMBIG_DEFAULTS["gap_threshold"].default
 # DRAM failure diagnosis. It never influences the prediction itself --
 # ground truth is only used AFTER the real result is already computed.
 GT_MATCH_TOLERANCE_PX = 15
+
+
+# Working-resolution safety cap for the SEARCH image (the dominant memory
+# driver -- see multiscale_ncc_candidates' docstring in template_matching.py
+# for why: score_map/winner_map/matchTemplate's result array all scale with
+# search image pixel count, evaluated ~45 times per call). Measured on a
+# synthetic pair matching a real production OOM (Render, 512MB limit):
+# reference 7994x5810 / search 3848x2160 (8.3 megapixels) peaked at 931MB
+# RSS with the pre-vectorization implementation. After vectorizing
+# multiscale_ncc_candidates (see that file), the SAME 8.3MP case peaks at
+# ~344MB -- already under 512MB with headroom for the Flask/gunicorn
+# baseline. This cap is a defense-in-depth safety net for even larger
+# uploads (the upload endpoint currently allows up to 8000px per side,
+# i.e. up to 64 megapixels) which would still exceed 512MB even
+# post-vectorization. 6 megapixels was chosen so the already-measured 8.3MP
+# case (344MB) sits comfortably ABOVE the cap, i.e. this cap is
+# conservative relative to real measured behavior, not a guess.
+MAX_SEARCH_PIXELS = 6_000_000
 
 
 class PipelineError(Exception):
@@ -87,16 +144,26 @@ def _event(stage, status, message, data=None):
     }
 
 
-def _candidate_public(c, rank=None):
+def _candidate_public(c, rank=None, scale_back=1.0):
     """Serialize a candidate dict to JSON-safe, frontend-friendly fields.
-    Only fields that actually exist on the candidate are included."""
+    Only fields that actually exist on the candidate are included.
+
+    `scale_back` converts a candidate's coordinates from the internal
+    "working resolution" (which may be downscaled from the original
+    upload -- see MAX_SEARCH_PIXELS below) back to the ORIGINAL image's
+    pixel space, which is the only coordinate space the frontend/API
+    contract ever exposes. It is 1.0 (a no-op) whenever no downscaling
+    was needed -- true for every curated example and the vast majority
+    of uploads, so this never changes behavior for the already-verified
+    (CLI-parity, DRAM-diagnosis-parity) cases.
+    """
     out = {
-        "x": round(float(c["x"]), 2),
-        "y": round(float(c["y"]), 2),
-        "w": int(c["w"]),
-        "h": int(c["h"]),
-        "tl_x": int(c["tl"][0]),
-        "tl_y": int(c["tl"][1]),
+        "x": round(float(c["x"]) * scale_back, 2),
+        "y": round(float(c["y"]) * scale_back, 2),
+        "w": int(round(c["w"] * scale_back)),
+        "h": int(round(c["h"] * scale_back)),
+        "tl_x": int(round(c["tl"][0] * scale_back)),
+        "tl_y": int(round(c["tl"][1] * scale_back)),
         "ncc_score": round(float(c["score"]), 4),
         "scale": round(float(c["scale"]), 4),
         "angle_deg": round(float(c["angle"]), 3),
@@ -203,6 +270,8 @@ def run_localization(reference_path, search_path, gt=None, topk=5,
     """
     run_id = run_id or uuid.uuid4().hex[:12]
     t0 = time.time()
+    log.info(f"run {run_id} start: reference={os.path.basename(reference_path)} "
+              f"search={os.path.basename(search_path)} gt_source={gt_source if gt else 'none'}")
 
     yield _event("load", "running", "Loading reference and search images.",
                  {"run_id": run_id})
@@ -217,10 +286,56 @@ def run_localization(reference_path, search_path, gt=None, topk=5,
         yield _event("load", "failed", f"Could not read search image: {search_path}")
         raise PipelineError("Could not read search image", stage="load")
 
-    yield _event("load", "complete", "Images loaded.", {
-        "reference_shape": {"w": int(reference.shape[1]), "h": int(reference.shape[0])},
-        "search_shape": {"w": int(search.shape[1]), "h": int(search.shape[0])},
-    })
+    orig_ref_w, orig_ref_h = int(reference.shape[1]), int(reference.shape[0])
+    orig_search_w, orig_search_h = int(search.shape[1]), int(search.shape[0])
+
+    # Working-resolution safety net (see MAX_SEARCH_PIXELS above). Only
+    # engages for genuinely large uploads -- every curated example (1000x1000
+    # = 1MP) and the vast majority of realistic uploads are well under the
+    # cap and take the scale_back=1.0 (no-op) path, so this cannot change
+    # behavior for anything already verified against the CLI / DRAM
+    # diagnosis. `working_scale` < 1.0 means the pipeline internally runs on
+    # a downscaled copy of BOTH images (uniformly, so the reference:search
+    # size relationship the algorithm assumes -- see
+    # template_matching.py -- is preserved exactly); every coordinate
+    # reported to the caller is scaled back to the ORIGINAL image's pixel
+    # space via `scale_back` before being yielded, so the API/frontend
+    # contract (always original-image pixel coordinates) never changes.
+    search_pixels = orig_search_w * orig_search_h
+    working_scale = 1.0
+    if search_pixels > MAX_SEARCH_PIXELS:
+        working_scale = (MAX_SEARCH_PIXELS / search_pixels) ** 0.5
+        work_search_w = max(8, int(round(orig_search_w * working_scale)))
+        work_search_h = max(8, int(round(orig_search_h * working_scale)))
+        work_ref_w = max(8, int(round(orig_ref_w * working_scale)))
+        work_ref_h = max(8, int(round(orig_ref_h * working_scale)))
+        search = cv2.resize(search, (work_search_w, work_search_h), interpolation=cv2.INTER_AREA)
+        reference = cv2.resize(reference, (work_ref_w, work_ref_h), interpolation=cv2.INTER_AREA)
+
+    scale_back = 1.0 / working_scale  # multiply working-space coords by this to report original-space coords
+
+    if working_scale < 1.0:
+        log.info(f"run {run_id}: search={orig_search_w}x{orig_search_h} "
+                  f"({search_pixels/1e6:.1f}MP) exceeds {MAX_SEARCH_PIXELS/1e6:.0f}MP cap, "
+                  f"downscaling {working_scale:.3f}x -> working search "
+                  f"{search.shape[1]}x{search.shape[0]}")
+
+    load_data = {
+        "reference_shape": {"w": orig_ref_w, "h": orig_ref_h},
+        "search_shape": {"w": orig_search_w, "h": orig_search_h},
+    }
+    load_msg = "Images loaded."
+    if working_scale < 1.0:
+        load_data["downscaled_for_processing"] = True
+        load_data["working_search_shape"] = {"w": search.shape[1], "h": search.shape[0]}
+        load_msg = (
+            f"Images loaded. Search image ({orig_search_w}x{orig_search_h}px, "
+            f"{search_pixels/1e6:.1f}MP) exceeds the {MAX_SEARCH_PIXELS/1e6:.0f}MP "
+            f"working-resolution limit for this deployment, so both images were "
+            f"downscaled {working_scale:.3f}x for processing. All reported "
+            f"coordinates below are rescaled back to the original image."
+        )
+    yield _event("load", "complete", load_msg, load_data)
 
     # ---- Template extraction ------------------------------------------------
     # The backend treats the entire supplied reference image as the
@@ -228,8 +343,8 @@ def run_localization(reference_path, search_path, gt=None, topk=5,
     # matches localization/inference.py::localize() exactly.
     yield _event("template_extraction", "complete",
                  "Reference image registered as the match template.", {
-                     "template_w": int(reference.shape[1]),
-                     "template_h": int(reference.shape[0]),
+                     "template_w": orig_ref_w,
+                     "template_h": orig_ref_h,
                  })
 
     # ---- Candidate generation (multi-scale/rotation NCC) --------------------
@@ -240,10 +355,11 @@ def run_localization(reference_path, search_path, gt=None, topk=5,
 
     if not candidates:
         runtime = round(time.time() - t0, 4)
+        log.info(f"run {run_id} done: runtime={runtime}s no candidates generated")
         yield _event("candidate_generation", "failed",
                      "No NCC candidates found above threshold.")
         result = {
-            "x": search.shape[1] / 2.0, "y": search.shape[0] / 2.0,
+            "x": orig_search_w / 2.0, "y": orig_search_h / 2.0,
             "confidence": 0.0, "ambiguous": True,
             "runtime_sec": runtime, "candidates_considered": 0,
             "note": "no NCC candidates found above threshold; returning image center as fallback",
@@ -257,7 +373,7 @@ def run_localization(reference_path, search_path, gt=None, topk=5,
                  f"Generated {len(candidates)} candidate location(s) before verification/ranking.",
                  {
                      "candidate_count": len(candidates),
-                     "candidates": [_candidate_public(c) for c in candidates],
+                     "candidates": [_candidate_public(c, scale_back=scale_back) for c in candidates],
                  })
 
     # ---- Candidate verification (ORB + RANSAC), per candidate ---------------
@@ -275,7 +391,7 @@ def run_localization(reference_path, search_path, gt=None, topk=5,
         yield _event("verification", "running",
                      f"Verified candidate {i + 1}/{len(candidates)}: "
                      f"{inliers} geometrically-consistent feature correspondences.",
-                     {"candidate_index": i, "candidate": _candidate_public(c)})
+                     {"candidate_index": i, "candidate": _candidate_public(c, scale_back=scale_back)})
 
     yield _event("verification", "complete",
                  "All candidates verified.")
@@ -285,23 +401,27 @@ def run_localization(reference_path, search_path, gt=None, topk=5,
 
     yield _event("ranking", "complete",
                  "Candidates ranked by combined NCC + ORB-verification score.",
-                 {"ranking": [_candidate_public(c, rank=i) for i, c in enumerate(ranked)]})
+                 {"ranking": [_candidate_public(c, rank=i, scale_back=scale_back) for i, c in enumerate(ranked)]})
 
     # ---- Decision ---------------------------------------------------------
+    # NOTE: select_final_candidate's center-tie-break needs the shape of the
+    # image `ranked`'s coordinates actually live in -- i.e. the WORKING
+    # (possibly downscaled) search image, not the original -- so this call
+    # must happen before any coordinate rescaling.
     best = select_final_candidate(ranked, search.shape)
-    ambiguous = is_ambiguous(ranked)
+    ambiguous = is_ambiguous(ranked)  # score-based only, scale-independent
 
     yield _event("decision", "complete",
                  "Final candidate selected (highest score; center-tie-break applied if needed).",
                  {
-                     "selected": _candidate_public(best),
+                     "selected": _candidate_public(best, scale_back=scale_back),
                      "backend_ambiguous_flag": bool(ambiguous),
                      "ambiguous_gap_threshold": AMBIGUOUS_GAP,
                  })
 
     runtime = round(time.time() - t0, 4)
     result = {
-        "x": best["x"], "y": best["y"],
+        "x": round(best["x"] * scale_back, 2), "y": round(best["y"] * scale_back, 2),
         "confidence": round(best["final_score"], 4),
         "ambiguous": bool(ambiguous),
         "runtime_sec": runtime,
@@ -310,9 +430,19 @@ def run_localization(reference_path, search_path, gt=None, topk=5,
 
     diagnosis = None
     if gt is not None:
+        # gt is always supplied in ORIGINAL-image pixel space (curated
+        # annotations, or the client's crop-derived self_gt computed from
+        # the original upload) -- so classify_failure must compare against
+        # candidates in that same original-image space, not the working
+        # (possibly downscaled) space `ranked`/`best` are still in here.
         gt_x, gt_y = gt
-        diagnosis = classify_failure(ranked, gt_x, gt_y, best)
-        error_px = math.hypot(best["x"] - gt_x, best["y"] - gt_y)
+        ranked_orig = [
+            {**c, "x": c["x"] * scale_back, "y": c["y"] * scale_back}
+            for c in ranked
+        ]
+        best_orig = {**best, "x": best["x"] * scale_back, "y": best["y"] * scale_back}
+        diagnosis = classify_failure(ranked_orig, gt_x, gt_y, best_orig)
+        error_px = math.hypot(best_orig["x"] - gt_x, best_orig["y"] - gt_y)
         diagnosis["ground_truth"] = {"x": gt_x, "y": gt_y}
         diagnosis["error_px"] = round(error_px, 2)
         diagnosis["gt_source"] = gt_source
@@ -321,3 +451,9 @@ def run_localization(reference_path, search_path, gt=None, topk=5,
         "result": result,
         "diagnosis": diagnosis,
     })
+
+    peak_mb = _peak_rss_mb()
+    peak_str = f"{peak_mb:.0f}MB" if peak_mb is not None else "n/a"
+    log.info(f"run {run_id} done: runtime={runtime}s peak_rss={peak_str} "
+              f"candidates={len(ranked)} ambiguous={ambiguous} "
+              f"diagnosis={diagnosis['category'] if diagnosis else 'n/a'}")

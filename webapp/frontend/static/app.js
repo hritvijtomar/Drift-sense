@@ -479,6 +479,7 @@ function runStream(url) {
 
   const es = new EventSource(url);
   state.es = es;
+  let streamEnded = false; // guards against onerror firing after we've already handled completion
 
   es.onmessage = (msg) => {
     const ev = JSON.parse(msg.data);
@@ -512,6 +513,7 @@ function runStream(url) {
     }
 
     if (stage === "result") {
+      streamEnded = true;
       $("#scanline").classList.remove("active");
       if (status === "complete") {
         const result = data.result;
@@ -536,7 +538,34 @@ function runStream(url) {
   };
 
   es.onerror = () => {
-    appendFeed("connection", "failed", "Lost connection to the localization stream.", {});
+    if (streamEnded) return; // stream already completed normally; a trailing close event is not an error
+    streamEnded = true;
+
+    // A true EventSource-level error (as opposed to a normal in-stream
+    // "result: failed" event, handled above) means the connection itself
+    // dropped mid-run -- e.g. the server process was killed or the proxy
+    // returned a 502. Mark every stage that never reached "done" as
+    // failed instead of leaving it stuck mid-animation, and surface a
+    // specific, actionable message rather than a generic one.
+    STAGES.forEach((s) => {
+      const step = $(`#step-${s.key}`);
+      if (step && !step.classList.contains("done")) {
+        setStage(s.key, "failed");
+      }
+    });
+    $("#scanline").classList.remove("active");
+
+    const msg = "The connection to the server was lost while this was running. " +
+      "This usually means the request took too long or the server ran out of memory " +
+      "processing the image. Try a smaller image, or click Run again.";
+    appendFeed("connection", "failed", msg, {});
+    $("#resultPanel").style.display = "block";
+    $("#diagnosisBanner").innerHTML = `<div class="diagnosis-banner diag-genmiss">
+      <span class="dg-title">CONNECTION LOST</span>
+      ${msg}</div>`;
+    $("#resultGrid").innerHTML = "";
+    $("#resultExplain").textContent = "";
+
     es.close();
     $("#btnRun").disabled = false;
   };
